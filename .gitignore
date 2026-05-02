@@ -1,0 +1,18 @@
+# Certificados y claves — NUNCA subir
+certs/*.key
+certs/*.crt
+certs/*.csr
+certs/*.pem
+certs/*.p12
+
+# Variables de entorno
+.env
+
+# Entorno virtual
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store

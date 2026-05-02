@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Facturadora AFIP</title>
+  <style>
+    :root {
+      --primary: #1a3a5c;
+      --accent:  #0066cc;
+      --success: #16a34a;
+      --error:   #dc2626;
+      --bg:      #f1f5f9;
+      --card:    #ffffff;
+      --border:  #e2e8f0;
+      --text:    #1e293b;
+      --muted:   #64748b;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+    }
+
+    header {
+      background: var(--primary); color: #fff;
+      padding: 0.875rem 1.5rem;
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    #env-badge {
+      margin-left: auto; font-size: 0.7rem; font-weight: 600;
+      padding: 0.2rem 0.6rem; border-radius: 999px; letter-spacing: 0.05em;
+      background: rgba(255,255,255,0.15); color: #fff;
+    }
+    #env-badge.prod { background: #16a34a; }
+
+    main { max-width: 740px; margin: 1.75rem auto; padding: 0 1rem; }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.25rem;
+    }
+    .card h2 { font-size: 0.95rem; font-weight: 700; color: var(--primary); margin-bottom: 1.25rem; }
+
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--muted); margin-bottom: 0.35rem; }
+    .field input, .field select {
+      width: 100%; padding: 0.55rem 0.75rem;
+      border: 1px solid var(--border); border-radius: 0.45rem;
+      font-size: 0.9rem; font-family: inherit; color: var(--text);
+      background: #fff; transition: border-color 0.15s;
+    }
+    .field input:focus, .field select:focus {
+      outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent;
+    }
+    .field input.invalid { border-color: var(--error); background: #fff5f5; }
+    .field .hint { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.6rem 1.25rem; border-radius: 0.45rem;
+      font-size: 0.875rem; font-weight: 600; cursor: pointer;
+      border: none; transition: background 0.15s, opacity 0.15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; width: 100%; justify-content: center; }
+    .btn-primary:hover:not(:disabled) { background: #0052a3; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border); font-size: 0.8rem; padding: 0.35rem 0.75rem;
+    }
+    .btn-ghost:hover { background: var(--bg); }
+
+    .alert {
+      padding: 0.65rem 0.9rem; border-radius: 0.45rem; font-size: 0.85rem;
+      margin-bottom: 1rem; line-height: 1.5;
+    }
+    .alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .alert-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .alert-warn    { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.35);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.65s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .result-box {
+      border: 1px solid var(--border); border-radius: 0.5rem; overflow: hidden;
+    }
+    .result-row {
+      display: flex; align-items: flex-start; gap: 1rem;
+      padding: 1rem; border-bottom: 1px solid var(--border);
+    }
+    .result-row:last-child { border-bottom: none; }
+    .result-meta { flex: 1; }
+    .result-meta .main { font-weight: 700; font-size: 1rem; margin-bottom: 0.2rem; }
+    .result-meta .sub { font-size: 0.8rem; color: var(--muted); }
+    .badge {
+      display: inline-block; padding: 0.2rem 0.65rem; border-radius: 999px;
+      font-size: 0.72rem; font-weight: 600;
+    }
+    .badge-ok  { background: #dcfce7; color: #166534; }
+    .badge-err { background: #fee2e2; color: #991b1b; }
+    .cae-num {
+      font-family: monospace; font-size: 0.9rem; font-weight: 700;
+      background: #f0f7ff; padding: 0.2rem 0.6rem; border-radius: 0.3rem;
+      display: inline-block; margin-top: 0.3rem;
+    }
+    .cae-label { font-size: 0.72rem; color: var(--muted); margin-top: 0.15rem; }
+
+    .toggle-row {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem;
+      cursor: pointer; user-select: none;
+    }
+    .toggle-row input { accent-color: var(--accent); width: 1rem; height: 1rem; }
+
+    .btn-download {
+      display: inline-block; padding: 0.35rem 0.85rem;
+      background: #f0f7ff; color: var(--accent);
+      border: 1px solid #93c5fd; border-radius: 0.4rem;
+      font-size: 0.8rem; font-weight: 600; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-download:hover:not(:disabled) { background: #dbeafe; }
+    .btn-download:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #cert-warning { display: none; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <line x1="16" y1="13" x2="8" y2="13"/>
+    <line x1="16" y1="17" x2="8" y2="17"/>
+  </svg>
+  <h1>Facturadora AFIP — Florencia De Los Santos</h1>
+  <span id="env-badge">cargando...</span>
+</header>
+
+<main>
+
+  <div id="cert-warning" class="alert alert-warn">
+    ⚠️ <strong>Certificado no configurado.</strong>
+    Copiá <code>cert.crt</code> y <code>private.key</code> en la carpeta <code>certs/</code> y reiniciá el servidor.
+  </div>
+
+  <!-- Formulario -->
+  <div id="step-form" class="card">
+    <h2>Nueva Factura C</h2>
+
+    <div id="form-error" class="alert alert-error hidden"></div>
+
+    <div class="field">
+      <label>CUIT del receptor</label>
+      <input type="text" id="cuit" placeholder="20123456789" maxlength="13"
+             oninput="this.classList.remove('invalid')">
+      <div class="hint">Sin guiones · 11 dígitos</div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>Importe (ARS)</label>
+        <input type="number" id="importe" placeholder="15000.00" min="0.01" step="0.01">
+      </div>
+      <div class="field">
+        <label>Fecha de pago</label>
+        <input type="date" id="fecha" value="">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Concepto</label>
+      <select id="concepto">
+        <option value="2" selected>Servicios</option>
+        <option value="1">Productos</option>
+        <option value="3">Productos y Servicios</option>
+      </select>
+    </div>
+
+    <label class="toggle-row">
+      <input type="checkbox" id="chk-month" checked>
+      Período de servicio = mes completo del pago
+      <span style="font-size:0.75rem;">(recomendado para servicios)</span>
+    </label>
+
+    <button class="btn btn-primary" id="btn-emitir" onclick="emitir()">
+      Emitir Factura
+    </button>
+  </div>
+
+  <!-- Resultados -->
+  <div id="step-results" class="hidden">
+    <div id="results-list" class="result-box"></div>
+    <div style="margin-top:0.75rem;text-align:right;">
+      <button class="btn btn-ghost" onclick="nuevaFactura()">+ Nueva factura</button>
+    </div>
+  </div>
+
+</main>
+
+<script>
+"use strict";
+
+// Fecha default = hoy
+document.getElementById("fecha").value = new Date().toISOString().slice(0, 10);
+
+// Config
+(async () => {
+  try {
+    const cfg = await (await fetch("/api/config")).json();
+    const badge = document.getElementById("env-badge");
+    badge.textContent = cfg.env;
+    if (!cfg.testing) badge.classList.add("prod");
+    if (!cfg.certs_available) {
+      document.getElementById("cert-warning").style.display = "block";
+    }
+  } catch (_) {}
+})();
+
+async function emitir() {
+  const cuitRaw = document.getElementById("cuit").value.replace(/\D/g, "").trim();
+  const importe = parseFloat(document.getElementById("importe").value);
+  const fecha   = document.getElementById("fecha").value;          // YYYY-MM-DD
+  const concepto = parseInt(document.getElementById("concepto").value);
+  const useMonth = document.getElementById("chk-month").checked;
+
+  // Validaciones
+  clearErr();
+  let ok = true;
+
+  if (!validCuit(cuitRaw)) {
+    document.getElementById("cuit").classList.add("invalid");
+    showErr("CUIT inválido. Verificá que tenga 11 dígitos y sea correcto.");
+    ok = false;
+  }
+  if (!importe || importe <= 0) {
+    showErr("El importe debe ser mayor a cero.");
+    ok = false;
+  }
+  if (!fecha) {
+    showErr("Seleccioná una fecha.");
+    ok = false;
+  }
+  if (!ok) return;
+
+  const btn = document.getElementById("btn-emitir");
+  btn.disabled = true;
+  btn.innerHTML = `<div class="spinner"></div> Emitiendo…`;
+
+  try {
+    const resp = await fetch("/api/facturar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{
+          date: fecha,
+          description: "",
+          amount: importe,
+          receptor_cuit: cuitRaw,
+          concepto,
+          use_month_period: useMonth,
+        }]
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Error del servidor.");
+    renderResult(data.results[0], importe, cuitRaw, fecha);
+  } catch (err) {
+    showErr(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "Emitir Factura";
+  }
+}
+
+let pdfStore = [];
+
+function renderResult(r, importe, cuit, fecha) {
+  const list = document.getElementById("results-list");
+
+  let html;
+  if (r.success) {
+    const idx = pdfStore.length;
+    pdfStore.push(r);
+    html = `<div class="result-row">
+      <div class="result-meta">
+        <div class="main">$${fmt(importe)}</div>
+        <div class="sub">${fmtDate(fecha)} · CUIT ${fmtCuit(cuit)}</div>
+      </div>
+      <div style="text-align:right;">
+        <span class="badge badge-ok">Emitida ✓</span>
+        <div style="margin-top:0.35rem;font-size:0.78rem;color:var(--muted);">
+          Cte. N° <strong>${String(r.cbte_nro).padStart(8,"0")}</strong>
+        </div>
+        <div class="cae-num">${r.cae}</div>
+        <div class="cae-label">CAE · vto ${fmtYMD(r.cae_vto)}</div>
+        <button class="btn-download" onclick="downloadPdf(${idx})" style="margin-top:0.6rem;">
+          ↓ Descargar PDF
+        </button>
+      </div>
+    </div>`;
+  } else {
+    html = `<div class="result-row">
+      <div class="result-meta">
+        <div class="main">$${fmt(importe)}</div>
+        <div class="sub">${fmtDate(fecha)} · CUIT ${fmtCuit(cuit)}</div>
+      </div>
+      <div style="text-align:right;">
+        <span class="badge badge-err">Error</span>
+        <div style="font-size:0.8rem;color:var(--error);margin-top:0.4rem;max-width:260px;">${esc(r.error)}</div>
+      </div>
+    </div>`;
+  }
+
+  list.insertAdjacentHTML("afterbegin", html);
+  document.getElementById("step-results").classList.remove("hidden");
+}
+
+async function downloadPdf(idx) {
+  const data = pdfStore[idx];
+  const btn = event.currentTarget;
+  btn.textContent = "Generando…";
+  btn.disabled = true;
+  try {
+    const resp = await fetch("/api/preview-pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!resp.ok) throw new Error("Error al generar el PDF.");
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `FactC_${String(data.cbte_nro).padStart(8,"0")}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.textContent = "↓ Descargar PDF";
+    btn.disabled = false;
+  }
+}
+
+function nuevaFactura() {
+  document.getElementById("cuit").value = "";
+  document.getElementById("importe").value = "";
+  document.getElementById("fecha").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("cuit").classList.remove("invalid");
+  clearErr();
+  document.getElementById("cuit").focus();
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────────
+function validCuit(c) {
+  c = c.replace(/\D/g, "");
+  if (c.length !== 11) return false;
+  const f = [5,4,3,2,7,6,5,4,3,2];
+  const s = f.reduce((a, v, i) => a + v * +c[i], 0);
+  let ch = 11 - (s % 11);
+  if (ch === 11) ch = 0;
+  if (ch === 10) return false;
+  return ch === +c[10];
+}
+
+function fmt(n) {
+  return new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2 }).format(n);
+}
+
+function fmtDate(iso) {
+  if (!iso) return "";
+  const [y,m,d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function fmtYMD(s) {
+  if (!s || s.length < 8) return s || "";
+  return `${s.slice(6,8)}/${s.slice(4,6)}/${s.slice(0,4)}`;
+}
+
+function fmtCuit(s) {
+  if (!s || s.length !== 11) return s;
+  return `${s.slice(0,2)}-${s.slice(2,10)}-${s.slice(10)}`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function showErr(msg) {
+  const el = document.getElementById("form-error");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+function clearErr() {
+  document.getElementById("form-error").classList.add("hidden");
+}
+</script>
+</body>
+</html>

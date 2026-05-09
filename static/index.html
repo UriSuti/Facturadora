@@ -207,6 +207,53 @@
     </div>
   </div>
 
+  <!-- Excel -->
+  <div class="card" style="margin-top:0.5rem;">
+    <h2>Importar desde Excel</h2>
+
+    <div id="excel-error" class="alert alert-error hidden"></div>
+    <div id="excel-success" class="alert alert-success hidden"></div>
+
+    <div class="upload-zone" id="excel-zone" style="padding:1.5rem;">
+      <input type="file" id="excel-input" accept=".xlsx,.xls">
+      <div class="icon" style="font-size:1.75rem;">📊</div>
+      <p>
+        Arrastrá el Excel acá o
+        <em id="excel-link">seleccionalo</em>
+      </p>
+      <p style="font-size:0.75rem;margin-top:0.3rem;">
+        Columnas requeridas: <strong>CUIT</strong> · <strong>Importe</strong> · <strong>Fecha</strong>
+      </p>
+    </div>
+
+    <!-- Preview tabla -->
+    <div id="excel-preview" class="hidden" style="margin-top:1rem;">
+      <div class="summary-bar">
+        <span>Filas detectadas: <strong id="excel-count">0</strong></span>
+        <span class="total">Total: <span id="excel-total">$0</span></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fila</th>
+              <th>CUIT</th>
+              <th>Fecha</th>
+              <th style="text-align:right;">Importe</th>
+            </tr>
+          </thead>
+          <tbody id="excel-tbody"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:0.75rem;margin-top:1rem;">
+        <button class="btn btn-ghost" onclick="resetExcel()">Cancelar</button>
+        <button class="btn btn-primary" id="btn-excel-emitir" onclick="emitirExcel()">
+          Emitir todas las facturas
+        </button>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <script>
@@ -407,6 +454,116 @@ function showErr(msg) {
 
 function clearErr() {
   document.getElementById("form-error").classList.add("hidden");
+}
+
+// ── Excel ──────────────────────────────────────────────────────────────────────
+let excelItems = [];
+
+const excelZone  = document.getElementById("excel-zone");
+const excelInput = document.getElementById("excel-input");
+document.getElementById("excel-link").onclick = () => excelInput.click();
+excelZone.addEventListener("dragover",  e => { e.preventDefault(); excelZone.classList.add("over"); });
+excelZone.addEventListener("dragleave", () => excelZone.classList.remove("over"));
+excelZone.addEventListener("drop", e => {
+  e.preventDefault(); excelZone.classList.remove("over");
+  if (e.dataTransfer.files[0]) handleExcel(e.dataTransfer.files[0]);
+});
+excelInput.addEventListener("change", () => { if (excelInput.files[0]) handleExcel(excelInput.files[0]); });
+
+async function handleExcel(file) {
+  document.getElementById("excel-error").classList.add("hidden");
+  document.getElementById("excel-success").classList.add("hidden");
+
+  const fd = new FormData();
+  fd.append("file", file);
+  try {
+    const resp = await fetch("/api/parse-excel", { method: "POST", body: fd });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Error al procesar el Excel.");
+    if (data.items.length === 0) throw new Error("El Excel no tiene filas con datos.");
+    excelItems = data.items;
+    renderExcelPreview();
+  } catch (err) {
+    const el = document.getElementById("excel-error");
+    el.textContent = err.message;
+    el.classList.remove("hidden");
+  }
+}
+
+function renderExcelPreview() {
+  const tbody = document.getElementById("excel-tbody");
+  tbody.innerHTML = "";
+  let total = 0;
+
+  excelItems.forEach((item, i) => {
+    total += item.amount;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td style="color:var(--muted);font-size:0.8rem;">${i + 1}</td>
+      <td style="font-size:0.85rem;">${fmtCuit(item.receptor_cuit)}</td>
+      <td style="font-size:0.85rem;">${fmtDate(item.date)}</td>
+      <td class="amount credit" style="text-align:right;">$${fmt(item.amount)}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById("excel-count").textContent = excelItems.length;
+  document.getElementById("excel-total").textContent = "$" + fmt(total);
+  document.getElementById("excel-preview").classList.remove("hidden");
+}
+
+async function emitirExcel() {
+  const btn = document.getElementById("btn-excel-emitir");
+  btn.disabled = true;
+  btn.innerHTML = `<div class="spinner"></div> Emitiendo ${excelItems.length} factura(s)…`;
+
+  try {
+    const resp = await fetch("/api/facturar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: excelItems }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Error del servidor.");
+
+    // Mostrar resultados en el panel principal
+    data.results.forEach((r, i) => {
+      const item = excelItems[i];
+      renderResult(r, item.amount, item.receptor_cuit, item.date);
+    });
+
+    const ok  = data.results.filter(r => r.success).length;
+    const err = data.results.filter(r => !r.success).length;
+    const msg = document.getElementById("excel-success");
+    msg.textContent = err === 0
+      ? `${ok} factura(s) emitida(s) correctamente. Los PDFs aparecen arriba.`
+      : `${ok} emitida(s), ${err} con error. Revisa los resultados arriba.`;
+    msg.classList.remove("hidden");
+
+    resetExcel();
+  } catch (err) {
+    const el = document.getElementById("excel-error");
+    el.textContent = err.message;
+    el.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "Emitir todas las facturas";
+  }
+}
+
+function resetExcel() {
+  excelItems = [];
+  excelInput.value = "";
+  document.getElementById("excel-preview").classList.add("hidden");
+}
+
+function fmtDate(s) {
+  if (!s) return "";
+  // Si viene como YYYY-MM-DD lo convertimos
+  if (s.includes("-") && s.length === 10) {
+    const [y, m, d] = s.split("-");
+    return `${d}/${m}/${y}`;
+  }
+  return s;
 }
 </script>
 </body>

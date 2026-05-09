@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 from afip import AFIPClient, AFIPError
+from excel_parser import parse_invoice_excel
 from invoice_pdf import generate_invoice_pdf
 from pdf_parser import parse_santander_pdf
 
@@ -71,6 +72,20 @@ def get_config():
         "pto_vta": PTO_VTA,
         "env": "Homologación (testing)" if TESTING else "Producción",
     }
+
+
+@app.post("/api/parse-excel")
+async def parse_excel(file: UploadFile):
+    if not (file.filename or "").lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "Solo se aceptan archivos Excel (.xlsx).")
+    content = await file.read()
+    try:
+        items = parse_invoice_excel(content)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(422, f"No se pudo procesar el Excel: {e}")
+    return {"items": items, "total": len(items)}
 
 
 @app.post("/api/parse-pdf")

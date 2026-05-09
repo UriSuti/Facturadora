@@ -2,12 +2,13 @@ import base64
 import calendar
 import datetime
 import ssl
-import subprocess
-import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import requests
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.serialization import pkcs7
 from requests.adapters import HTTPAdapter
 
 
@@ -97,27 +98,17 @@ def _build_tra() -> bytes:
 
 
 def _sign_cms(data: bytes, cert_path: str, key_path: str) -> str:
-    with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
-        tmp.write(data)
-        tra_path = tmp.name
-    try:
-        result = subprocess.run(
-            [
-                "openssl", "cms", "-sign",
-                "-in",     tra_path,
-                "-signer", cert_path,
-                "-inkey",  key_path,
-                "-nodetach",
-                "-outform", "DER",
-            ],
-            capture_output=True,
-            check=True,
-        )
-        return base64.b64encode(result.stdout).decode("ascii")
-    except subprocess.CalledProcessError as e:
-        raise AFIPError(f"Error firmando CMS: {e.stderr.decode()}") from e
-    finally:
-        Path(tra_path).unlink(missing_ok=True)
+    with open(cert_path, "rb") as f:
+        cert = x509.load_pem_x509_certificate(f.read())
+    with open(key_path, "rb") as f:
+        private_key = serialization.load_pem_private_key(f.read(), password=None)
+    signed = (
+        pkcs7.PKCS7SignatureBuilder()
+        .set_data(data)
+        .add_signer(cert, private_key, hashes.SHA256())
+        .sign(serialization.Encoding.DER, [pkcs7.PKCS7Options.Binary])
+    )
+    return base64.b64encode(signed).decode("ascii")
 
 
 def _call_wsaa(cms_b64: str, env: str) -> tuple[str, str, str]:
@@ -246,7 +237,11 @@ class AFIPClient:
     ) -> dict:
         token, sign = self._get_token_sign()
 
-        fecha_str = _normalize_date(fecha) if fecha else datetime.datetime.now(TZ_AR).strftime("%Y%m%d")
+        # CbteFch = siempre hoy (AFIP rechaza fechas con más de 5 días de antigüedad)
+        hoy = datetime.datetime.now(TZ_AR).strftime("%Y%m%d")
+        # La fecha del input se usa solo para calcular el período de servicio
+        fecha_servicio = _normalize_date(fecha) if fecha else hoy
+        fecha_str = hoy
         importe   = round(float(importe), 2)
 
         cuit_clean = receptor_cuit.replace("-", "").strip()
@@ -257,11 +252,11 @@ class AFIPClient:
 
         next_cbte = self._last_cbte(pto_vta) + 1
 
-        # Service period
+        # Service period (usa fecha_servicio, no la de emisión)
         desde = hasta = None
         service_dates = ""
         if concepto in (2, 3):
-            desde, hasta = _month_range(fecha_str) if use_month_period else (fecha_str, fecha_str)
+            desde, hasta = _month_range(fecha_servicio) if use_month_period else (fecha_servicio, fecha_servicio)
             service_dates = (
                 f"<ar:FchServDesde>{desde}</ar:FchServDesde>"
                 f"<ar:FchServHasta>{hasta}</ar:FchServHasta>"

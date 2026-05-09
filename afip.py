@@ -32,7 +32,13 @@ WSFE_URL = {
     "homo": "https://wswhomo.afip.gov.ar/wsfev1/service.asmx",
     "prod": "https://servicios1.afip.gov.ar/wsfev1/service.asmx",
 }
-WSFE_NS  = "http://ar.gov.afip.dif.FEV1/"
+WSFE_NS   = "http://ar.gov.afip.dif.FEV1/"
+
+PADRON_URL = {
+    "homo": "https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA4",
+    "prod": "https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA4",
+}
+PADRON_NS = "http://a4.soap.ws.server.puc.sr/"
 
 CBTE_TIPO_C  = 11
 DOC_TIPO_CUIT = 80
@@ -81,7 +87,7 @@ def _tag(el: ET.Element, name: str) -> str:
 
 # ── WSAA ──────────────────────────────────────────────────────────────────────
 
-def _build_tra() -> bytes:
+def _build_tra(service: str = "wsfe") -> bytes:
     now    = datetime.datetime.now(TZ_AR).replace(microsecond=0)
     expire = now + datetime.timedelta(hours=10)
     return (
@@ -92,7 +98,7 @@ def _build_tra() -> bytes:
         f"<generationTime>{now.isoformat()}</generationTime>"
         f"<expirationTime>{expire.isoformat()}</expirationTime>"
         "</header>"
-        "<service>wsfe</service>"
+        f"<service>{service}</service>"
         "</loginTicketRequest>"
     ).encode("utf-8")
 
@@ -190,6 +196,9 @@ class AFIPClient:
         self._token:   str | None = None
         self._sign:    str | None = None
         self._expires: str | None = None
+        self._p_token:   str | None = None
+        self._p_sign:    str | None = None
+        self._p_expires: str | None = None
 
     def certs_available(self) -> bool:
         return Path(self.cert_path).exists() and Path(self.key_path).exists()
@@ -209,6 +218,54 @@ class AFIPClient:
         if not self._token or not self._expires or now >= self._expires:
             self._refresh_ticket()
         return self._token, self._sign
+
+    def _get_padron_token_sign(self) -> tuple[str, str]:
+        now = datetime.datetime.now(TZ_AR).replace(microsecond=0).isoformat()
+        if not self._p_token or not self._p_expires or now >= self._p_expires:
+            tra = _build_tra("ws_sr_padron_a4")
+            cms = _sign_cms(tra, self.cert_path, self.key_path)
+            self._p_token, self._p_sign, self._p_expires = _call_wsaa(cms, self.env)
+        return self._p_token, self._p_sign
+
+    def get_receptor_info(self, receptor_cuit: str) -> dict:
+        """Devuelve nombre y domicilio fiscal del receptor desde el padrón AFIP."""
+        token, sign = self._get_padron_token_sign()
+        cuit_clean = receptor_cuit.replace("-", "").strip()
+
+        soap = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" '
+            f'xmlns:per="{PADRON_NS}">'
+            "<soapenv:Header/><soapenv:Body>"
+            "<per:getPersona>"
+            f"<token>{token}</token>"
+            f"<sign>{sign}</sign>"
+            f"<cuitRepresentada>{self.cuit}</cuitRepresentada>"
+            f"<idPersona>{cuit_clean}</idPersona>"
+            "</per:getPersona>"
+            "</soapenv:Body></soapenv:Envelope>"
+        )
+        resp = _session.post(
+            PADRON_URL[self.env], data=soap.encode("utf-8"),
+            headers={"Content-Type": "text/xml;charset=UTF-8", "SOAPAction": '""'},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+
+        tipo = root.findtext(f".//{{{PADRON_NS}}}tipoPersona") or "FISICA"
+        if tipo == "JURIDICA":
+            nombre = root.findtext(f".//{{{PADRON_NS}}}razonSocial") or ""
+        else:
+            nombre = root.findtext(f".//{{{PADRON_NS}}}nombre") or ""
+
+        direccion = root.findtext(f".//{{{PADRON_NS}}}direccion") or ""
+        localidad = root.findtext(f".//{{{PADRON_NS}}}localidad") or ""
+        provincia = root.findtext(f".//{{{PADRON_NS}}}descripcionProvincia") or ""
+        parts = [p for p in [direccion, localidad, provincia] if p and p not in direccion]
+        domicilio = " - ".join([direccion] + parts) if direccion else " - ".join(parts)
+
+        return {"nombre": nombre.upper(), "domicilio": domicilio.upper()}
 
     def test_connection(self) -> bool:
         result = _wsfe(self.env, "FEDummy", "<ar:FEDummy/>")

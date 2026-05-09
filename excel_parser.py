@@ -26,6 +26,10 @@ def parse_invoice_excel(excel_bytes: bytes) -> list[dict]:
             col["importe"] = i
         elif "fecha" in h:
             col["fecha"] = i
+        elif "nombre" in h or "razon" in h or "razon social" in h:
+            col["nombre"] = i
+        elif "domicilio" in h or "direccion" in h or "direcci" in h:
+            col["domicilio"] = i
 
     missing = [k for k in ("cuit", "importe", "fecha") if k not in col]
     if missing:
@@ -60,13 +64,18 @@ def parse_invoice_excel(excel_bytes: bytes) -> list[dict]:
         if not fecha:
             raise ValueError(f"Fila {row_num}: fecha vacía")
 
+        nombre    = str(row[col["nombre"]] or "").strip()    if "nombre"    in col else ""
+        domicilio = str(row[col["domicilio"]] or "").strip() if "domicilio" in col else ""
+
         results.append({
-            "date":             fecha,
-            "description":      "",
-            "amount":           importe,
-            "receptor_cuit":    cuit,
-            "concepto":         2,
-            "use_month_period": True,
+            "date":               fecha,
+            "description":        "",
+            "amount":             importe,
+            "receptor_cuit":      cuit,
+            "receptor_nombre":    nombre,
+            "receptor_domicilio": domicilio,
+            "concepto":           2,
+            "use_month_period":   True,
         })
 
     return results

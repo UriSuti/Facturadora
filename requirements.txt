@@ -8,3 +8,4 @@ requests==2.32.3
 fpdf2==2.7.9
 segno==1.6.1
 openpyxl==3.1.5
+pillow==11.2.1

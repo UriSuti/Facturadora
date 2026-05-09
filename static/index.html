@@ -164,8 +164,20 @@
     <div class="field">
       <label>CUIT del receptor</label>
       <input type="text" id="cuit" placeholder="20123456789" maxlength="13"
-             oninput="this.classList.remove('invalid')">
-      <div class="hint">Sin guiones · 11 dígitos</div>
+             oninput="this.classList.remove('invalid')"
+             onblur="buscarReceptor(this.value)">
+      <div class="hint" id="cuit-hint">Sin guiones · 11 dígitos</div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>Nombre / Razón Social del receptor</label>
+        <input type="text" id="receptor-nombre" placeholder="GARCIA JUAN CARLOS">
+      </div>
+      <div class="field">
+        <label>Domicilio del receptor <span style="font-weight:400;color:var(--muted)">(opcional)</span></label>
+        <input type="text" id="receptor-domicilio" placeholder="Av. Corrientes 1234, CABA">
+      </div>
     </div>
 
     <div class="row">
@@ -315,6 +327,8 @@ async function emitir() {
           description: "",
           amount: importe,
           receptor_cuit: cuitRaw,
+          receptor_nombre: document.getElementById("receptor-nombre").value.trim(),
+          receptor_domicilio: document.getElementById("receptor-domicilio").value.trim(),
           concepto,
           use_month_period: useMonth,
         }]
@@ -405,6 +419,8 @@ function nuevaFactura() {
   document.getElementById("cuit").value = "";
   document.getElementById("importe").value = "";
   document.getElementById("fecha").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("receptor-nombre").value = "";
+  document.getElementById("receptor-domicilio").value = "";
   document.getElementById("cuit").classList.remove("invalid");
   clearErr();
   document.getElementById("cuit").focus();
@@ -444,6 +460,31 @@ function fmtCuit(s) {
 
 function esc(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+async function buscarReceptor(raw) {
+  const cuit = raw.replace(/\D/g, "");
+  if (!validCuit(cuit)) return;
+
+  const hint = document.getElementById("cuit-hint");
+  hint.textContent = "Buscando en AFIP...";
+
+  try {
+    const resp = await fetch(`/api/receptor-info/${cuit}`);
+    const data = await resp.json();
+
+    if (data.nombre) {
+      document.getElementById("receptor-nombre").value = data.nombre;
+      document.getElementById("receptor-domicilio").value = data.domicilio || "";
+      hint.textContent = "Datos completados desde AFIP";
+    } else {
+      hint.textContent = "No se encontró en el padrón — completá manualmente";
+    }
+  } catch (_) {
+    hint.textContent = "Sin guiones · 11 dígitos";
+  }
+
+  setTimeout(() => { hint.textContent = "Sin guiones · 11 dígitos"; }, 4000);
 }
 
 function showErr(msg) {

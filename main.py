@@ -25,10 +25,12 @@ TESTING = os.getenv("TESTING", "true").lower() == "true"
 afip = AFIPClient(CUIT, CERT_PATH, KEY_PATH, testing=TESTING)
 
 PDF_CONFIG = {
-    "cuit":         CUIT,
-    "razon_social": "FLORENCIA DE LOS SANTOS",
-    "domicilio":    "Camargo 111, CABA",
-    "pto_vta":      PTO_VTA,
+    "cuit":                CUIT,
+    "razon_social":        os.getenv("RAZON_SOCIAL", "FLORENCIA DE LOS SANTOS"),
+    "domicilio":           os.getenv("DOMICILIO", "Camargo 111, CABA"),
+    "ing_brutos":          os.getenv("ING_BRUTOS", "exenta"),
+    "inicio_actividades":  os.getenv("INICIO_ACTIVIDADES", "01/07/2014"),
+    "pto_vta":             PTO_VTA,
 }
 
 app = FastAPI(title="Facturadora AFIP", docs_url=None, redoc_url=None)
@@ -41,6 +43,8 @@ class InvoiceItem(BaseModel):
     description: str
     amount: float
     receptor_cuit: str
+    receptor_nombre: str = ""
+    receptor_domicilio: str = ""
     concepto: int = 2
     use_month_period: bool = True
 
@@ -56,6 +60,8 @@ class InvoiceResult(BaseModel):
     fecha: str
     importe: float
     receptor_cuit: str
+    receptor_nombre: str = ""
+    receptor_domicilio: str = ""
     concepto: int = 2
     fch_serv_desde: str | None = None
     fch_serv_hasta: str | None = None
@@ -72,6 +78,14 @@ def get_config():
         "pto_vta": PTO_VTA,
         "env": "Homologación (testing)" if TESTING else "Producción",
     }
+
+
+@app.get("/api/receptor-info/{cuit}")
+def receptor_info(cuit: str):
+    try:
+        return afip.get_receptor_info(cuit)
+    except Exception:
+        return {"nombre": "", "domicilio": ""}
 
 
 @app.post("/api/parse-excel")
@@ -121,6 +135,8 @@ def facturar(req: InvoiceRequest):
                 fecha=item.date,
                 use_month_period=item.use_month_period,
             )
+            invoice["receptor_nombre"]    = item.receptor_nombre
+            invoice["receptor_domicilio"] = item.receptor_domicilio
             results.append({"success": True, **invoice})
         except AFIPError as e:
             results.append({"success": False, "error": str(e)})
